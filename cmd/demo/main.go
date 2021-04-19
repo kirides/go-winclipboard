@@ -48,6 +48,13 @@ func main() {
 	clipboard.AddClipboardFormatListener(h.Handle)
 	defer clipboard.RemoveClipboardFormatListener(h.Handle)
 
+	if err := clipboard.Empty(); err != nil {
+		fmt.Printf("Could not clear clipboard: %v\n", err)
+	} else {
+		if err := clipboard.SetUnicodeText("Hello World!"); err != nil {
+			fmt.Printf("Could not set text: %v\n", err)
+		}
+	}
 	// support graceful shutdown
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
 	defer cancel()

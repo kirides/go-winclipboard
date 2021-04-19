@@ -1,6 +1,7 @@
 package clipboard
 
 import (
+	"fmt"
 	"syscall"
 	"unsafe"
 
@@ -18,12 +19,14 @@ var (
 
 	procOpenClipboard                 = modUser32.NewProc("OpenClipboard")
 	procCloseClipboard                = modUser32.NewProc("CloseClipboard")
+	procEmptyClipboard                = modUser32.NewProc("EmptyClipboard")
 	procRegisterClipboardFormat       = modUser32.NewProc("RegisterClipboardFormatW")
 	procEnumClipboardFormats          = modUser32.NewProc("EnumClipboardFormats")
 	procGetClipboardFormatName        = modUser32.NewProc("GetClipboardFormatNameW")
 	procAddClipboardFormatListener    = modUser32.NewProc("AddClipboardFormatListener")
 	procRemoveClipboardFormatListener = modUser32.NewProc("RemoveClipboardFormatListener")
 	procGetClipboardData              = modUser32.NewProc("GetClipboardData")
+	procSetClipboardData              = modUser32.NewProc("SetClipboardData")
 	procIsClipboardFormatAvailable    = modUser32.NewProc("IsClipboardFormatAvailable")
 
 	procDragQueryFileW        = modShell32.NewProc("DragQueryFileW")
@@ -32,6 +35,8 @@ var (
 
 	procGetProcessHeap = modKernel32.NewProc("GetProcessHeap")
 	procHeapSize       = modKernel32.NewProc("HeapSize")
+	procHeapAlloc      = modKernel32.NewProc("HeapAlloc")
+	procHeapFree       = modKernel32.NewProc("HeapFree")
 )
 
 func getProcessHeap() (syscall.Handle, error) {
@@ -47,6 +52,20 @@ func heapSize(hHeap syscall.Handle, dwFlags uint32, lpMem uintptr) (uintptr, err
 		return 0, e1
 	}
 	return r1, e1
+}
+func heapAlloc(hHeap syscall.Handle, dwFlags uint32, dwSize uint32) (uintptr, error) {
+	r1, _, _ := syscall.Syscall(procHeapAlloc.Addr(), 3, uintptr(hHeap), uintptr(dwFlags), uintptr(dwSize))
+	if r1 == 0 {
+		return 0, fmt.Errorf("Could not allocate")
+	}
+	return r1, nil
+}
+func heapFree(hHeap syscall.Handle, dwFlags uint32, lpMem uintptr) error {
+	r1, _, e1 := syscall.Syscall(procHeapFree.Addr(), 3, uintptr(hHeap), uintptr(dwFlags), uintptr(lpMem))
+	if r1 == 0 {
+		return e1
+	}
+	return nil
 }
 
 // SECTION : CLIPBOARD
@@ -92,6 +111,13 @@ func openClipboard(hWndNewOwner syscall.Handle) (err error) {
 	}
 	return
 }
+func emptyClipboard() (err error) {
+	r1, _, e1 := syscall.Syscall(procEmptyClipboard.Addr(), 0, 0, 0, 0)
+	if r1 == 0 {
+		err = e1
+	}
+	return
+}
 func getClipboardData(id uint32) (h uintptr, err error) {
 	r1, _, e1 := syscall.Syscall(procGetClipboardData.Addr(), 1, uintptr(id), 0, 0)
 	if r1 == 0 {
@@ -99,6 +125,28 @@ func getClipboardData(id uint32) (h uintptr, err error) {
 	}
 	h = r1
 	return
+}
+func setClipboardData(id uint32, value []byte) error {
+	hHeap, err := getProcessHeap()
+	if hHeap == 0 {
+		return err
+	}
+	hMem, err := heapAlloc(hHeap, 0, uint32(len(value)))
+	if err != nil {
+		return err
+	}
+	b := byteSliceFromUintptr(uintptr(hMem), len(value))
+	copy(b, value)
+
+	r1, _, e1 := syscall.Syscall(procSetClipboardData.Addr(), 2, uintptr(id), uintptr(hMem), 0)
+	if r1 == 0 {
+		e2 := heapFree(hHeap, 0, hMem)
+		if e2 != nil {
+			return fmt.Errorf("Failed to free heap memory: %v. %w", e2, e1)
+		}
+		return e1
+	}
+	return nil
 }
 
 func isClipboardFormatAvailable(id uint32) (ok bool, err error) {

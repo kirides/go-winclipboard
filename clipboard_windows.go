@@ -1,6 +1,7 @@
 package clipboard
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/text/encoding/unicode"
 )
 
 func getClipboardDataHGlobalSlice(id uint32) (s []byte, err error) {
@@ -27,6 +29,45 @@ func getClipboardDataHGlobalSlice(id uint32) (s []byte, err error) {
 	}
 	s = byteSliceFromUintptr(r1, int(size))
 	return s, nil
+}
+
+func SetData(id uint, data []byte) error {
+	return setClipboardData(uint32(id), data)
+}
+
+func getUnicodeBytes(text string) ([]byte, error) {
+	enc := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM).NewEncoder()
+	buf := bytes.NewBuffer(nil)
+	_, err := enc.Writer(buf).Write([]byte(text))
+	if err != nil {
+		return nil, err
+	}
+	buf.WriteByte(0)
+	buf.WriteByte(0)
+	return buf.Bytes(), nil
+}
+
+func Empty() error {
+	if err := openClipboard(0); err != nil {
+		return err
+	}
+	defer closeClipboard()
+	return emptyClipboard()
+}
+
+func SetUnicodeText(text string) error {
+	data, err := getUnicodeBytes(text)
+	if err != nil {
+		return err
+	}
+
+	const CF_UNICODETEXT = 13
+	if err := openClipboard(0); err != nil {
+		return err
+	}
+
+	defer closeClipboard()
+	return setClipboardData(CF_UNICODETEXT, data)
 }
 
 // GetFileGroupDescriptor returns a slice containing file metadata (filename + filesize) in the FileGroupDescriptorW slot
