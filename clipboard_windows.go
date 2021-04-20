@@ -32,7 +32,7 @@ func getClipboardDataHGlobalSlice(id uint32) (s []byte, err error) {
 }
 
 func SetData(id uint, data []byte) error {
-	return setClipboardData(uint32(id), data)
+	return setClipboardDataSlice(uint32(id), data)
 }
 
 func getUnicodeBytes(text string) ([]byte, error) {
@@ -60,14 +60,13 @@ func SetUnicodeText(text string) error {
 	if err != nil {
 		return err
 	}
-
 	const CF_UNICODETEXT = 13
 	if err := openClipboard(0); err != nil {
 		return err
 	}
 
 	defer closeClipboard()
-	return setClipboardData(CF_UNICODETEXT, data)
+	return setClipboardDataSlice(CF_UNICODETEXT, data)
 }
 
 // GetFileGroupDescriptor returns a slice containing file metadata (filename + filesize) in the FileGroupDescriptorW slot
@@ -81,12 +80,8 @@ func GetFileGroupDescriptor() ([]FileInfo, error) {
 	}
 	defer closeClipboard()
 
-	ok, err := isClipboardFormatAvailable(id)
-	if err != nil {
+	if err := isClipboardFormatAvailable(id); err != nil {
 		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("Format not available.")
 	}
 	h, err := getClipboardDataHGlobalSlice(id)
 	if err != nil {
@@ -117,12 +112,8 @@ func GetHDROP() ([]string, error) {
 	}
 	defer closeClipboard()
 
-	ok, err := isClipboardFormatAvailable(id)
-	if err != nil {
+	if err := isClipboardFormatAvailable(id); err != nil {
 		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("Format not available.")
 	}
 	h, err := getClipboardData(id)
 	if err != nil {
@@ -130,15 +121,21 @@ func GetHDROP() ([]string, error) {
 	}
 	buf := make([]uint16, 72)
 	const NUM_ENTRIES = 0xFFFFFFFF
-	n, err := dragQueryFile(syscall.Handle(h), NUM_ENTRIES, nil)
+	n, err := dragQueryFileSlice(syscall.Handle(h), NUM_ENTRIES, nil)
+	if err != nil {
+		return nil, err
+	}
 	if n > 0 {
 		var result []string
 		for i := 0; i < n; i++ {
-			reqBufSize, err := dragQueryFile(syscall.Handle(h), i, nil)
+			reqBufSize, err := dragQueryFileSlice(syscall.Handle(h), i, nil)
+			if err != nil {
+				return nil, err
+			}
 			if reqBufSize > len(buf) {
 				buf = make([]uint16, reqBufSize+1)
 			}
-			n, err := dragQueryFile(syscall.Handle(h), i, buf)
+			n, err := dragQueryFileSlice(syscall.Handle(h), i, buf)
 			if err != nil {
 				return nil, err
 			}
@@ -152,24 +149,25 @@ func GetHDROP() ([]string, error) {
 // GetShellIDListArray DEPRECATED
 func GetShellIDListArray() ([]string, error) {
 	id, err := registerClipboardFormat("Shell IDList Array")
+	if err != nil {
+		return nil, err
+	}
 	if err := openClipboard(0); err != nil {
 		return nil, err
 	}
 	defer closeClipboard()
 
-	ok, err := isClipboardFormatAvailable(id)
-	if err != nil {
+	if err := isClipboardFormatAvailable(id); err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, fmt.Errorf("Format not available.")
-	}
+
 	h, err := getClipboardData(id)
 	if err != nil {
 		return nil, err
 	}
 
-	nItems := int(binary.LittleEndian.Uint32(byteSliceFromUintptr(h, 4)))
+	// nItems := int(binary.LittleEndian.Uint32(byteSliceFromUintptr(h, 4)))
+	nItems := int(binary.LittleEndian.Uint32((*[1 << 31]byte)(unsafe.Pointer(h))[:4:4]))
 	result := []string{}
 	if nItems > 0 {
 		buf := [1024]uint16{}
@@ -197,8 +195,8 @@ func GetShellIDListArray() ([]string, error) {
 	return result, nil
 }
 
-func shGetPIDLValue(cidl uintptr, offset int) uintptr {
-	return uintptr(binary.LittleEndian.Uint32(byteSliceFromUintptr(cidl+4+(4*uintptr(offset)), 4)))
+func shGetPIDLValue(cidl syscall.Handle, offset int) uintptr {
+	return uintptr(binary.LittleEndian.Uint32(byteSliceFromUintptr(uintptr(cidl)+4+(4*uintptr(offset)), 4)))
 }
 
 // Formats returns a slice that contains all formats currently avaiable in the clipboard
@@ -208,14 +206,14 @@ func Formats() ([]int, error) {
 	}
 	defer closeClipboard()
 
-	var f uint = 0
+	var f uint32 = 0
 	var err error
 	var result []int
 	retries := 0
 	for {
 		f, err = enumClipboardFormats(f)
 		if err != nil {
-			if errors.Is(err, windows.ERROR_SUCCESS) {
+			if errors.Is(err, errERROR_EINVAL) {
 				break
 			}
 			if errors.Is(err, windows.ERROR_CLIPBOARD_NOT_OPEN) ||
@@ -290,7 +288,7 @@ func isRegisteredClipboardFormat(id uint) bool {
 func FormatName(id int) (string, error) {
 	if isRegisteredClipboardFormat(uint(id)) {
 		buf := [256]uint16{}
-		n, err := getClipboardFormatName(uint(id), buf[:])
+		n, err := getClipboardFormatName(uint32(id), &buf[0], int32(len(buf)))
 		if err != nil {
 			return "", err
 		}
