@@ -47,6 +47,8 @@ var (
 	procHeapFree                      = modKernel32.NewProc("HeapFree")
 	procHeapSize                      = modKernel32.NewProc("HeapSize")
 	procDragQueryFileW                = modShell32.NewProc("DragQueryFileW")
+	procSHGetKnownFolderPath          = modShell32.NewProc("SHGetKnownFolderPath")
+	procSHGetPathFromIDListEx         = modShell32.NewProc("SHGetPathFromIDListEx")
 	procAddClipboardFormatListener    = modUser32.NewProc("AddClipboardFormatListener")
 	procCloseClipboard                = modUser32.NewProc("CloseClipboard")
 	procEmptyClipboard                = modUser32.NewProc("EmptyClipboard")
@@ -90,7 +92,7 @@ func HeapFree(hHeap syscall.Handle, dwFlags uint32, lpMem uintptr) (err error) {
 func HeapSize(hHeap syscall.Handle, dwFlags uint32, lpMem uintptr) (size uintptr, err error) {
 	r0, _, e1 := syscall.Syscall(procHeapSize.Addr(), 3, uintptr(hHeap), uintptr(dwFlags), uintptr(lpMem))
 	size = uintptr(r0)
-	if size == ^uintptr(r0) {
+	if size == _INVALID_HANDLE {
 		err = errnoErr(e1)
 	}
 	return
@@ -100,6 +102,22 @@ func DragQueryFile(hDrop syscall.Handle, iFile int, buf *uint16, len uint32) (n 
 	r0, _, e1 := syscall.Syscall6(procDragQueryFileW.Addr(), 4, uintptr(hDrop), uintptr(iFile), uintptr(unsafe.Pointer(buf)), uintptr(len), 0, 0)
 	n = int(r0)
 	if n == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func _SHGetKnownFolderPath(id *KNOWNFOLDERID, dwFlags uint32, hToken syscall.Handle, ppszPath *unsafe.Pointer) (err error) {
+	r1, _, e1 := syscall.Syscall6(procSHGetKnownFolderPath.Addr(), 4, uintptr(unsafe.Pointer(id)), uintptr(dwFlags), uintptr(hToken), uintptr(unsafe.Pointer(ppszPath)), 0, 0)
+	if r1 != _S_OK {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func _SHGetPathFromIDListEx(pidl uintptr, buf *uint16, len uint32) (err error) {
+	r1, _, e1 := syscall.Syscall(procSHGetPathFromIDListEx.Addr(), 3, uintptr(pidl), uintptr(unsafe.Pointer(buf)), uintptr(len))
+	if r1 == 0 {
 		err = errnoErr(e1)
 	}
 	return

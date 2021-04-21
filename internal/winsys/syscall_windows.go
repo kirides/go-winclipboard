@@ -30,10 +30,18 @@ type (
 	LPARAM   uintptr
 	LRESULT  uintptr
 	HOOKPROC func(int, WPARAM, LPARAM) LRESULT
+
+	KNOWNFOLDERID windows.GUID
 )
 
-//sys	setWindowsHookExW(idHook int32, lpfn unsafe.Pointer, hmod syscall.Handle, dwThreadId uint32) (h syscall.Handle, err error) = User32.SetWindowsHookExW
+var (
+	_S_OK = uintptr(0)
 
+	_INVALID_HANDLE = ^uintptr(0)
+)
+
+// --- User32 ---
+//sys	setWindowsHookExW(idHook int32, lpfn unsafe.Pointer, hmod syscall.Handle, dwThreadId uint32) (h syscall.Handle, err error) = User32.SetWindowsHookExW
 //sys	OpenClipboard(h syscall.Handle) (err error) = User32.OpenClipboard
 //sys	CloseClipboard() (err error) = User32.CloseClipboard
 //sys	EmptyClipboard() (err error) = User32.EmptyClipboard
@@ -46,35 +54,35 @@ type (
 //sys	AddClipboardFormatListener(hWnd syscall.Handle) (err error) = User32.AddClipboardFormatListener
 //sys	RemoveClipboardFormatListener(hWnd syscall.Handle) (err error) = User32.RemoveClipboardFormatListener
 
+// --- Kernel32 ---
 //sys	GetProcessHeap() (hHeap syscall.Handle, err error) = Kernel32.GetProcessHeap
 //sys	HeapAlloc(hHeap syscall.Handle, dwFlags uint32, dwSize uintptr) (lpMem uintptr, err error) = Kernel32.HeapAlloc
 //sys	HeapFree(hHeap syscall.Handle, dwFlags uint32, lpMem uintptr) (err error) = Kernel32.HeapFree
-//sys	HeapSize(hHeap syscall.Handle, dwFlags uint32, lpMem uintptr) (size uintptr, err error) [failretval==^uintptr(r0)] = Kernel32.HeapSize
+//sys	HeapSize(hHeap syscall.Handle, dwFlags uint32, lpMem uintptr) (size uintptr, err error) [failretval==_INVALID_HANDLE] = Kernel32.HeapSize
 
+// --- Shell32 ---
 //sys	DragQueryFile(hDrop syscall.Handle, iFile int, buf *uint16, len uint32) (n int, err error) = Shell32.DragQueryFileW
+//sys	_SHGetPathFromIDListEx(pidl uintptr, buf *uint16, len uint32) (err error) = Shell32.SHGetPathFromIDListEx
+//sys	_SHGetKnownFolderPath(id *KNOWNFOLDERID, dwFlags uint32, hToken syscall.Handle, ppszPath *unsafe.Pointer) (err error) [failretval!=_S_OK] = Shell32.SHGetKnownFolderPath
 
-var (
+func ShGetPathFromIDList(pidl uintptr, buf []uint16) error {
+	return _SHGetPathFromIDListEx(pidl, &buf[0], uint32(len(buf)))
+}
 
-	// Clipboard
-	procSHGetPathFromIDListEx = modShell32.NewProc("SHGetPathFromIDListEx")
-	procSHGetKnownFolderPath  = modShell32.NewProc("SHGetKnownFolderPath")
-)
-
-func GetDesktopFolder(token uintptr) (string, error) {
-	var desktopId = windows.GUID{Data1: 0xB4BFCC3A, Data2: 0xDB2C, Data3: 0x424C, Data4: [8]byte{0xB0, 0x29, 0x7F, 0xE9, 0x9A, 0x87, 0xC6, 0x41}}
+func SHGetKnownFolderPath(id *KNOWNFOLDERID, dwFlags uint32, hToken syscall.Handle) (string, error) {
 	var retVal unsafe.Pointer
-	r1, _, e1 := syscall.Syscall6(procSHGetKnownFolderPath.Addr(), 4, uintptr(unsafe.Pointer(&desktopId)), uintptr(0), uintptr(token), uintptr(unsafe.Pointer(&retVal)), 0, 0)
-	if r1 != 0 {
-		return "", e1
+	if err := _SHGetKnownFolderPath(id, 0, hToken, &retVal); err != nil {
+		return "", err
 	}
 	defer windows.CoTaskMemFree(retVal)
 	v := windows.UTF16PtrToString((*uint16)(retVal))
 	return v, nil
 }
-func ShGetPathFromIDList(pidl uintptr, buf []uint16) (err error) {
-	r1, _, e1 := syscall.Syscall6(procSHGetPathFromIDListEx.Addr(), 4, uintptr(pidl), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), 0, 0, 0)
-	if r1 == 0 {
-		err = e1
-	}
-	return
+
+var (
+	KF_DESKTOPDIR = KNOWNFOLDERID{Data1: 0xB4BFCC3A, Data2: 0xDB2C, Data3: 0x424C, Data4: [8]byte{0xB0, 0x29, 0x7F, 0xE9, 0x9A, 0x87, 0xC6, 0x41}}
+)
+
+func GetDesktopFolder(token syscall.Handle) (string, error) {
+	return SHGetKnownFolderPath(&KF_DESKTOPDIR, 0, token)
 }
