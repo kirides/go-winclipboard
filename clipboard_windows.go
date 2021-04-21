@@ -12,22 +12,31 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
+	"github.com/kirides/go-winclipboard/internal/winsys"
+
 	"golang.org/x/sys/windows"
 	"golang.org/x/text/encoding/unicode"
 )
 
+func AddClipboardFormatListener(h syscall.Handle) error {
+	return winsys.AddClipboardFormatListener(h)
+}
+func RemoveClipboardFormatListener(h syscall.Handle) error {
+	return winsys.RemoveClipboardFormatListener(h)
+}
+
 func getClipboardDataHGlobalSlice(id uint32) (s []byte, err error) {
-	r1, _, e1 := syscall.Syscall(procGetClipboardData.Addr(), 1, uintptr(id), 0, 0)
-	if r1 == 0 {
-		err = e1
+	r1, e1 := winsys.GetClipboardData(id)
+	if e1 != nil {
+		return nil, e1
 	}
-	hHeap, _ := getProcessHeap()
-	size, e2 := heapSize(hHeap, 0, r1)
+	hHeap, _ := winsys.GetProcessHeap()
+	size, e2 := winsys.HeapSize(hHeap, 0, uintptr(r1))
 
 	if size == 0 {
 		return nil, e2
 	}
-	s = byteSliceFromUintptr(r1, int(size))
+	s = byteSliceFromUintptr(uintptr(r1), int(size))
 	return s, nil
 }
 
@@ -48,11 +57,11 @@ func getUnicodeBytes(text string) ([]byte, error) {
 }
 
 func Empty() error {
-	if err := openClipboard(0); err != nil {
+	if err := winsys.OpenClipboard(0); err != nil {
 		return err
 	}
-	defer closeClipboard()
-	return emptyClipboard()
+	defer winsys.CloseClipboard()
+	return winsys.EmptyClipboard()
 }
 
 func SetUnicodeText(text string) error {
@@ -61,26 +70,26 @@ func SetUnicodeText(text string) error {
 		return err
 	}
 	const CF_UNICODETEXT = 13
-	if err := openClipboard(0); err != nil {
+	if err := winsys.OpenClipboard(0); err != nil {
 		return err
 	}
 
-	defer closeClipboard()
+	defer winsys.CloseClipboard()
 	return setClipboardDataSlice(CF_UNICODETEXT, data)
 }
 
 // GetFileGroupDescriptor returns a slice containing file metadata (filename + filesize) in the FileGroupDescriptorW slot
 func GetFileGroupDescriptor() ([]FileInfo, error) {
-	id, err := registerClipboardFormat("FileGroupDescriptorW")
+	id, err := winsys.RegisterClipboardFormat("FileGroupDescriptorW")
 	if err != nil {
 		return nil, err
 	}
-	if err := openClipboard(0); err != nil {
+	if err := winsys.OpenClipboard(0); err != nil {
 		return nil, err
 	}
-	defer closeClipboard()
+	defer winsys.CloseClipboard()
 
-	if err := isClipboardFormatAvailable(id); err != nil {
+	if err := winsys.IsClipboardFormatAvailable(id); err != nil {
 		return nil, err
 	}
 	h, err := getClipboardDataHGlobalSlice(id)
@@ -107,15 +116,15 @@ func GetFileGroupDescriptor() ([]FileInfo, error) {
 // returns a slice containing the filepaths in the H_DROP(15) slot
 func GetHDROP() ([]string, error) {
 	const id = 15
-	if err := openClipboard(0); err != nil {
+	if err := winsys.OpenClipboard(0); err != nil {
 		return nil, err
 	}
-	defer closeClipboard()
+	defer winsys.CloseClipboard()
 
-	if err := isClipboardFormatAvailable(id); err != nil {
+	if err := winsys.IsClipboardFormatAvailable(id); err != nil {
 		return nil, err
 	}
-	h, err := getClipboardData(id)
+	h, err := winsys.GetClipboardData(id)
 	if err != nil {
 		return nil, err
 	}
@@ -148,20 +157,20 @@ func GetHDROP() ([]string, error) {
 
 // GetShellIDListArray DEPRECATED
 func GetShellIDListArray() ([]string, error) {
-	id, err := registerClipboardFormat("Shell IDList Array")
+	id, err := winsys.RegisterClipboardFormat("Shell IDList Array")
 	if err != nil {
 		return nil, err
 	}
-	if err := openClipboard(0); err != nil {
+	if err := winsys.OpenClipboard(0); err != nil {
 		return nil, err
 	}
-	defer closeClipboard()
+	defer winsys.CloseClipboard()
 
-	if err := isClipboardFormatAvailable(id); err != nil {
+	if err := winsys.IsClipboardFormatAvailable(id); err != nil {
 		return nil, err
 	}
 
-	h, err := getClipboardData(id)
+	h, err := winsys.GetClipboardData(id)
 	if err != nil {
 		return nil, err
 	}
@@ -172,17 +181,17 @@ func GetShellIDListArray() ([]string, error) {
 	if nItems > 0 {
 		buf := [1024]uint16{}
 		offset := shGetPIDLValue(h, 0)
-		if err := shGetPathFromIDListW(uintptr(h)+offset, buf[:]); err != nil {
+		if err := winsys.ShGetPathFromIDList(uintptr(h)+offset, buf[:]); err != nil {
 			return nil, err
 		}
 		rootDir := syscall.UTF16ToString(buf[:])
-		desktopDir, err := getDesktopFolder(0)
+		desktopDir, err := winsys.GetDesktopFolder(0)
 		if err != nil {
 			return nil, err
 		}
 		for i := 0; i < nItems; i++ {
 			offset := shGetPIDLValue(h, i+1)
-			if err := shGetPathFromIDListW(uintptr(h)+offset, buf[:]); err != nil {
+			if err := winsys.ShGetPathFromIDList(uintptr(h)+offset, buf[:]); err != nil {
 				return nil, err
 			}
 			relPath, err := filepath.Rel(desktopDir, syscall.UTF16ToString(buf[:]))
@@ -201,25 +210,25 @@ func shGetPIDLValue(cidl syscall.Handle, offset int) uintptr {
 
 // Formats returns a slice that contains all formats currently avaiable in the clipboard
 func Formats() ([]int, error) {
-	if err := openClipboard(0); err != nil {
+	if err := winsys.OpenClipboard(0); err != nil {
 		return nil, err
 	}
-	defer closeClipboard()
+	defer winsys.CloseClipboard()
 
 	var f uint32 = 0
 	var err error
 	var result []int
 	retries := 0
 	for {
-		f, err = enumClipboardFormats(f)
+		f, err = winsys.EnumClipboardFormats(f)
 		if err != nil {
-			if errors.Is(err, errERROR_EINVAL) {
+			if errors.Is(err, syscall.EINVAL) {
 				break
 			}
 			if errors.Is(err, windows.ERROR_CLIPBOARD_NOT_OPEN) ||
 				errors.Is(err, windows.ERROR_ACCESS_DENIED) {
 				if retries < 3 {
-					if err := openClipboard(0); err == nil {
+					if err := winsys.OpenClipboard(0); err == nil {
 						retries++
 						time.Sleep(time.Millisecond * time.Duration(retries))
 						continue
@@ -288,7 +297,7 @@ func isRegisteredClipboardFormat(id uint) bool {
 func FormatName(id int) (string, error) {
 	if isRegisteredClipboardFormat(uint(id)) {
 		buf := [256]uint16{}
-		n, err := getClipboardFormatName(uint32(id), &buf[0], int32(len(buf)))
+		n, err := winsys.GetClipboardFormatName(uint32(id), &buf[0], int32(len(buf)))
 		if err != nil {
 			return "", err
 		}

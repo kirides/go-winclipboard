@@ -17,11 +17,9 @@ func GetHDROP() ([]string, error)
 func GetFileGroupDescriptor() ([]FileInfo, error)
 ```
 
-## Generating windows syscall wrappers 
-
-This package uses `golang.org/x/sys/windows/mkwinsyscall` to generate the win32 syscall wrappers
+## Building this module 
 
 ```
-> go install golang.org/x/sys/windows/mkwinsyscall
-> mkwinsyscall -output zsyscall_windows.go syscall_windows.go
+> go generate ./...
+> go build ./cmd/demo/main.go
 ```
