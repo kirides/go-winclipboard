@@ -39,13 +39,21 @@ func errnoErr(e syscall.Errno) error {
 
 var (
 	modKernel32 = windows.NewLazySystemDLL("Kernel32.dll")
+	modOle32    = windows.NewLazySystemDLL("Ole32.dll")
 	modShell32  = windows.NewLazySystemDLL("Shell32.dll")
 	modUser32   = windows.NewLazySystemDLL("User32.dll")
 
 	procGetProcessHeap                = modKernel32.NewProc("GetProcessHeap")
+	procGlobalLock                    = modKernel32.NewProc("GlobalLock")
+	procGlobalSize                    = modKernel32.NewProc("GlobalSize")
+	procGlobalUnlock                  = modKernel32.NewProc("GlobalUnlock")
 	procHeapAlloc                     = modKernel32.NewProc("HeapAlloc")
 	procHeapFree                      = modKernel32.NewProc("HeapFree")
 	procHeapSize                      = modKernel32.NewProc("HeapSize")
+	procCoInitializeEx                = modOle32.NewProc("CoInitializeEx")
+	procOleGetClipboard               = modOle32.NewProc("OleGetClipboard")
+	procOleInitialize                 = modOle32.NewProc("OleInitialize")
+	procReleaseStgMedium              = modOle32.NewProc("ReleaseStgMedium")
 	procDragQueryFileW                = modShell32.NewProc("DragQueryFileW")
 	procSHGetKnownFolderPath          = modShell32.NewProc("SHGetKnownFolderPath")
 	procSHGetPathFromIDListEx         = modShell32.NewProc("SHGetPathFromIDListEx")
@@ -67,6 +75,33 @@ func GetProcessHeap() (hHeap syscall.Handle, err error) {
 	r0, _, e1 := syscall.Syscall(procGetProcessHeap.Addr(), 0, 0, 0, 0)
 	hHeap = syscall.Handle(r0)
 	if hHeap == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func GlobalLock(hMem uintptr) (lpMem uintptr, err error) {
+	r0, _, e1 := syscall.Syscall(procGlobalLock.Addr(), 1, uintptr(hMem), 0, 0)
+	lpMem = uintptr(r0)
+	if lpMem == _INVALID_HANDLE {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func GlobalSize(hMem uintptr) (size uintptr, err error) {
+	r0, _, e1 := syscall.Syscall(procGlobalSize.Addr(), 1, uintptr(hMem), 0, 0)
+	size = uintptr(r0)
+	if size == _INVALID_HANDLE {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func GlobalUnlock(hMem uintptr) (ok int32, err error) {
+	r0, _, e1 := syscall.Syscall(procGlobalUnlock.Addr(), 1, uintptr(hMem), 0, 0)
+	ok = int32(r0)
+	if ok == 0 {
 		err = errnoErr(e1)
 	}
 	return
@@ -98,9 +133,41 @@ func HeapSize(hHeap syscall.Handle, dwFlags uint32, lpMem uintptr) (size uintptr
 	return
 }
 
-func DragQueryFile(hDrop syscall.Handle, iFile int, buf *uint16, len uint32) (n int, err error) {
+func CoInitializeEx(pvReserved uintptr, dwCoInit uint32) (err error) {
+	r1, _, e1 := syscall.Syscall(procCoInitializeEx.Addr(), 2, uintptr(pvReserved), uintptr(dwCoInit), 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func OleGetClipboard(ppDataObj **IDataObject) (err error) {
+	r1, _, e1 := syscall.Syscall(procOleGetClipboard.Addr(), 1, uintptr(unsafe.Pointer(ppDataObj)), 0, 0)
+	if r1 != _S_OK {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func OleInitialize(pvReserved uintptr) (err error) {
+	r1, _, e1 := syscall.Syscall(procOleInitialize.Addr(), 1, uintptr(pvReserved), 0, 0)
+	if r1 != _S_OK {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func ReleaseStgMedium(pStgMedium *STGMEDIUM) (err error) {
+	r1, _, e1 := syscall.Syscall(procReleaseStgMedium.Addr(), 1, uintptr(unsafe.Pointer(pStgMedium)), 0, 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func DragQueryFile(hDrop syscall.Handle, iFile uint32, buf *uint16, len uint32) (n uint32, err error) {
 	r0, _, e1 := syscall.Syscall6(procDragQueryFileW.Addr(), 4, uintptr(hDrop), uintptr(iFile), uintptr(unsafe.Pointer(buf)), uintptr(len), 0, 0)
-	n = int(r0)
+	n = uint32(r0)
 	if n == 0 {
 		err = errnoErr(e1)
 	}

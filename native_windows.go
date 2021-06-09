@@ -13,12 +13,13 @@ import (
 
 // SECTION : CLIPBOARD
 
-func dragQueryFileSlice(hDrop syscall.Handle, iFile int, buf []uint16) (int, error) {
+func dragQueryFileSlice(hDrop syscall.Handle, iFile uint, buf []uint16) (uint, error) {
 	var b *uint16
 	if len(buf) > 0 {
 		b = &buf[0]
 	}
-	return winsys.DragQueryFile(hDrop, iFile, b, uint32(len(buf)))
+	i32, err := winsys.DragQueryFile(hDrop, uint32(iFile), b, uint32(len(buf)))
+	return uint(i32), err
 }
 
 func setClipboardDataSlice(id uint32, value []byte) error {
@@ -30,7 +31,7 @@ func setClipboardDataSlice(id uint32, value []byte) error {
 	if err != nil {
 		return err
 	}
-	copy((*[1 << 31]byte)(unsafe.Pointer(hMem))[:len(value):len(value)], value)
+	copy((*[1 << 30]byte)(unsafe.Pointer(hMem))[:len(value):len(value)], value)
 	r, e1 := winsys.SetClipboardData(id, syscall.Handle(hMem))
 	if r != syscall.Handle(hMem) {
 		e2 := winsys.HeapFree(hHeap, 0, hMem)

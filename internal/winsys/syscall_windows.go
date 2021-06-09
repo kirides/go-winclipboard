@@ -60,10 +60,21 @@ var (
 //sys	HeapFree(hHeap syscall.Handle, dwFlags uint32, lpMem uintptr) (err error) = Kernel32.HeapFree
 //sys	HeapSize(hHeap syscall.Handle, dwFlags uint32, lpMem uintptr) (size uintptr, err error) [failretval==_INVALID_HANDLE] = Kernel32.HeapSize
 
+//sys	GlobalSize(hMem uintptr) (size uintptr, err error) [failretval==_INVALID_HANDLE] = Kernel32.GlobalSize
+//sys	GlobalLock(hMem uintptr) (lpMem uintptr, err error) [failretval==_INVALID_HANDLE] = Kernel32.GlobalLock
+//sys	GlobalUnlock(hMem uintptr) (ok int32, err error) = Kernel32.GlobalUnlock
+
 // --- Shell32 ---
-//sys	DragQueryFile(hDrop syscall.Handle, iFile int, buf *uint16, len uint32) (n int, err error) = Shell32.DragQueryFileW
+//sys	DragQueryFile(hDrop syscall.Handle, iFile uint32, buf *uint16, len uint32) (n uint32, err error) = Shell32.DragQueryFileW
 //sys	_SHGetPathFromIDListEx(pidl uintptr, buf *uint16, len uint32) (err error) = Shell32.SHGetPathFromIDListEx
 //sys	_SHGetKnownFolderPath(id *KNOWNFOLDERID, dwFlags uint32, hToken syscall.Handle, ppszPath *unsafe.Pointer) (err error) [failretval!=_S_OK] = Shell32.SHGetKnownFolderPath
+
+// --- Ole32 ---
+
+//sys	OleInitialize(pvReserved uintptr) (err error) [failretval!=_S_OK] = Ole32.OleInitialize
+//sys	OleGetClipboard(ppDataObj **IDataObject) (err error) [failretval!=_S_OK] = Ole32.OleGetClipboard
+//sys	CoInitializeEx(pvReserved uintptr, dwCoInit uint32) (err error) = Ole32.CoInitializeEx
+//sys	ReleaseStgMedium(pStgMedium *STGMEDIUM) (err error) = Ole32.ReleaseStgMedium
 
 func ShGetPathFromIDList(pidl uintptr, buf []uint16) error {
 	return _SHGetPathFromIDListEx(pidl, &buf[0], uint32(len(buf)))

@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"io"
 	"reflect"
 	"syscall"
 	"time"
@@ -113,9 +113,95 @@ func GetFileGroupDescriptor() ([]FileInfo, error) {
 	return result, nil
 }
 
+type comStreamWrapper struct {
+	iStream *winsys.IStream
+	medium  winsys.STGMEDIUM
+}
+
+func (s *comStreamWrapper) Read(buf []byte) (int, error) {
+	return s.iStream.Read(buf)
+}
+func (s *comStreamWrapper) Close() error {
+	return s.medium.Release()
+}
+func GetFileContents() ([]io.ReadCloser, error) {
+	fds, err := GetFileGroupDescriptor()
+	if err != nil {
+		return nil, err
+	}
+
+	var dataObject *winsys.IDataObject
+	if err := winsys.OleGetClipboard(&dataObject); err != nil {
+		return nil, err
+	}
+	defer dataObject.Release()
+	id1, _ := winsys.RegisterClipboardFormat("FileContents")
+
+	const DVASPECT_CONTENT = 0x1
+	format := winsys.FORMATETC{
+		ClipFormat:     uint16(id1),
+		DvTargetDevice: 0,
+		Aspect:         DVASPECT_CONTENT,
+		Index:          -1,
+		Tymed:          uint32(winsys.TymedHGLOBAL | winsys.TymedISTREAM),
+	}
+
+	var result []io.ReadCloser
+	for i := 0; i < len(fds); i++ {
+		format.Index = int32(i)
+		var medium winsys.STGMEDIUM
+		if err := dataObject.GetData(&format, &medium); err != nil {
+			return nil, err
+		}
+
+		stream, err := medium.Stream()
+		if err != nil {
+			medium.Release()
+			return nil, err
+		}
+		result = append(result, &comStreamWrapper{iStream: stream, medium: medium})
+	}
+
+	return result, nil
+}
+func GetFileContent(index int) (io.ReadCloser, error) {
+	var dataObject *winsys.IDataObject
+	if err := winsys.OleGetClipboard(&dataObject); err != nil {
+		return nil, err
+	}
+	defer dataObject.Release()
+	id1, _ := winsys.RegisterClipboardFormat("FileContents")
+
+	const DVASPECT_CONTENT = 0x1
+	format := winsys.FORMATETC{
+		ClipFormat:     uint16(id1),
+		DvTargetDevice: 0,
+		Aspect:         DVASPECT_CONTENT,
+		Index:          int32(index),
+		Tymed:          uint32(winsys.TymedHGLOBAL | winsys.TymedISTREAM),
+	}
+
+	var medium winsys.STGMEDIUM
+	if err := dataObject.GetData(&format, &medium); err != nil {
+		return nil, err
+	}
+
+	stream, err := medium.Stream()
+	if err != nil {
+		medium.Release()
+		return nil, err
+	}
+	return &comStreamWrapper{iStream: stream, medium: medium}, nil
+}
+
 // returns a slice containing the filepaths in the H_DROP(15) slot
 func GetHDROP() ([]string, error) {
+
 	const id = 15
+	// --------------
+
+	// ----------
+
 	if err := winsys.OpenClipboard(0); err != nil {
 		return nil, err
 	}
@@ -124,6 +210,7 @@ func GetHDROP() ([]string, error) {
 	if err := winsys.IsClipboardFormatAvailable(id); err != nil {
 		return nil, err
 	}
+
 	h, err := winsys.GetClipboardData(id)
 	if err != nil {
 		return nil, err
@@ -136,12 +223,12 @@ func GetHDROP() ([]string, error) {
 	}
 	if n > 0 {
 		var result []string
-		for i := 0; i < n; i++ {
+		for i := uint(0); i < n; i++ {
 			reqBufSize, err := dragQueryFileSlice(syscall.Handle(h), i, nil)
 			if err != nil {
 				return nil, err
 			}
-			if reqBufSize > len(buf) {
+			if int(reqBufSize) > len(buf) {
 				buf = make([]uint16, reqBufSize+1)
 			}
 			n, err := dragQueryFileSlice(syscall.Handle(h), i, buf)
@@ -153,59 +240,6 @@ func GetHDROP() ([]string, error) {
 		return result, nil
 	}
 	return []string{}, nil
-}
-
-// GetShellIDListArray DEPRECATED
-func GetShellIDListArray() ([]string, error) {
-	id, err := winsys.RegisterClipboardFormat("Shell IDList Array")
-	if err != nil {
-		return nil, err
-	}
-	if err := winsys.OpenClipboard(0); err != nil {
-		return nil, err
-	}
-	defer winsys.CloseClipboard()
-
-	if err := winsys.IsClipboardFormatAvailable(id); err != nil {
-		return nil, err
-	}
-
-	h, err := winsys.GetClipboardData(id)
-	if err != nil {
-		return nil, err
-	}
-
-	// nItems := int(binary.LittleEndian.Uint32(byteSliceFromUintptr(h, 4)))
-	nItems := int(binary.LittleEndian.Uint32((*[1 << 31]byte)(unsafe.Pointer(h))[:4:4]))
-	result := []string{}
-	if nItems > 0 {
-		buf := [1024]uint16{}
-		offset := shGetPIDLValue(h, 0)
-		if err := winsys.ShGetPathFromIDList(uintptr(h)+offset, buf[:]); err != nil {
-			return nil, err
-		}
-		rootDir := syscall.UTF16ToString(buf[:])
-		desktopDir, err := winsys.GetDesktopFolder(0)
-		if err != nil {
-			return nil, err
-		}
-		for i := 0; i < nItems; i++ {
-			offset := shGetPIDLValue(h, i+1)
-			if err := winsys.ShGetPathFromIDList(uintptr(h)+offset, buf[:]); err != nil {
-				return nil, err
-			}
-			relPath, err := filepath.Rel(desktopDir, syscall.UTF16ToString(buf[:]))
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, filepath.Join(rootDir, relPath))
-		}
-	}
-	return result, nil
-}
-
-func shGetPIDLValue(cidl syscall.Handle, offset int) uintptr {
-	return uintptr(binary.LittleEndian.Uint32(byteSliceFromUintptr(uintptr(cidl)+4+(4*uintptr(offset)), 4)))
 }
 
 // Formats returns a slice that contains all formats currently avaiable in the clipboard
@@ -242,7 +276,7 @@ func Formats() ([]int, error) {
 	return result, nil
 }
 
-var ErrUnknownClipboardFormat = errors.New("Unkown clipboard format")
+var ErrUnknownClipboardFormat = errors.New("unkown clipboard format")
 
 var predefinedFormatNames = map[uint]string{
 	1:  "CF_TEXT",
@@ -284,7 +318,7 @@ func predefinedFormatName(id uint) (string, error) {
 	if id > 0x0300 && id < 0x03FF {
 		return "GDIOBJ", nil
 	}
-	return "", fmt.Errorf("Unsupported format %d. %w", id, ErrUnknownClipboardFormat)
+	return "", fmt.Errorf("unsupported format %d. %w", id, ErrUnknownClipboardFormat)
 }
 
 func isRegisteredClipboardFormat(id uint) bool {
