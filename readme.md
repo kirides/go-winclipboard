@@ -15,6 +15,12 @@ func GetHDROP() ([]string, error)
 
 // returns a slice containing file metadata (filename + filesize) in the FileGroupDescriptorW slot
 func GetFileGroupDescriptor() ([]FileInfo, error)
+
+// returns the all FileContents.
+func GetFileContents() ([]NamedReadCloser, error)
+
+// returns the FileContents from the specified index
+func GetFileContent(index int) (NamedReadCloser, error)
 ```
 
 ## Building this module 
@@ -23,3 +29,10 @@ func GetFileGroupDescriptor() ([]FileInfo, error)
 > go generate ./...
 > go build ./cmd/demo/main.go
 ```
+
+## Remarks
+
+- Some APIs _do_ require a call to `clipboard.Init()`
+    - `GetFileContents`
+    - `GetFileContent`
+    - they also _might_ require a call to `runtime.LockOSThread()` on the current goroutine
