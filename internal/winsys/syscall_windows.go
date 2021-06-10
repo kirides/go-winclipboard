@@ -1,6 +1,7 @@
 package winsys
 
 import (
+	"fmt"
 	"syscall"
 	"unsafe"
 
@@ -35,10 +36,27 @@ type (
 )
 
 var (
-	_S_OK = uintptr(0)
+	_S_OK    = uintptr(0)
+	_S_FALSE = uintptr(1)
 
 	_INVALID_HANDLE = ^uintptr(0)
 )
+
+type HRESULT uintptr
+
+func (hr HRESULT) Error() string {
+	switch uint32(hr) {
+	case 0x80040064:
+		return "DV_E_FORMATETC (0x80040064)"
+	case 0x800401D3:
+		return "CLIPBRD_E_BAD_DATA (0x800401D3)"
+	case 0x80004005:
+		return "E_FAIL (0x80004005)"
+	case 0x00000001:
+		return "S_FALSE (0x00000001)"
+	}
+	return fmt.Sprintf("%d", hr)
+}
 
 // --- User32 ---
 //sys	setWindowsHookExW(idHook int32, lpfn unsafe.Pointer, hmod syscall.Handle, dwThreadId uint32) (h syscall.Handle, err error) = User32.SetWindowsHookExW
@@ -82,7 +100,7 @@ func ShGetPathFromIDList(pidl uintptr, buf []uint16) error {
 
 func SHGetKnownFolderPath(id *KNOWNFOLDERID, dwFlags uint32, hToken syscall.Handle) (string, error) {
 	var retVal unsafe.Pointer
-	if err := _SHGetKnownFolderPath(id, 0, hToken, &retVal); err != nil {
+	if err := _SHGetKnownFolderPath(id, dwFlags, hToken, &retVal); err != nil {
 		return "", err
 	}
 	defer windows.CoTaskMemFree(retVal)

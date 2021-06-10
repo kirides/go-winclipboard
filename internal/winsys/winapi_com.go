@@ -2,6 +2,7 @@ package winsys
 
 import (
 	"fmt"
+	"io"
 	"syscall"
 	"unsafe"
 )
@@ -49,8 +50,11 @@ func (obj *IStream) Read(buffer []byte) (int, error) {
 		0,
 		0,
 	)
+	if ret == _S_FALSE {
+		return int(read), io.EOF
+	}
 	if ret != _S_OK {
-		return 0, HRESULT(ret)
+		return int(read), HRESULT(ret)
 	}
 	return int(read), nil
 }
@@ -100,18 +104,6 @@ func (obj *IUnknown) Release() error {
 		return HRESULT(ret)
 	}
 	return nil
-}
-
-type HRESULT uintptr
-
-func (hr HRESULT) Error() string {
-	switch uint32(hr) {
-	case 0x80040064:
-		return "DV_E_FORMATETC (0x80040064)"
-	case 0x800401D3:
-		return "CLIPBRD_E_BAD_DATA (0x800401D3)"
-	}
-	return fmt.Sprintf("%d", hr)
 }
 
 type iDataObjectVtbl struct {

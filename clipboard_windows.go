@@ -18,6 +18,15 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
+const (
+	_CFSTR_FILEGROUPDESCRIPTORW = "FileGroupDescriptorW"
+	_CFSTR_FILECONTENTS         = "FileContents"
+)
+
+func Init() error {
+	return winsys.OleInitialize(0)
+}
+
 func AddClipboardFormatListener(h syscall.Handle) error {
 	return winsys.AddClipboardFormatListener(h)
 }
@@ -80,7 +89,7 @@ func SetUnicodeText(text string) error {
 
 // GetFileGroupDescriptor returns a slice containing file metadata (filename + filesize) in the FileGroupDescriptorW slot
 func GetFileGroupDescriptor() ([]FileInfo, error) {
-	id, err := winsys.RegisterClipboardFormat("FileGroupDescriptorW")
+	id, err := winsys.RegisterClipboardFormat(_CFSTR_FILEGROUPDESCRIPTORW)
 	if err != nil {
 		return nil, err
 	}
@@ -113,9 +122,15 @@ func GetFileGroupDescriptor() ([]FileInfo, error) {
 	return result, nil
 }
 
+type NamedReadCloser interface {
+	io.ReadCloser
+	Name() string
+}
+
 type comStreamWrapper struct {
 	iStream *winsys.IStream
 	medium  winsys.STGMEDIUM
+	name    string
 }
 
 func (s *comStreamWrapper) Read(buf []byte) (int, error) {
@@ -124,7 +139,10 @@ func (s *comStreamWrapper) Read(buf []byte) (int, error) {
 func (s *comStreamWrapper) Close() error {
 	return s.medium.Release()
 }
-func GetFileContents() ([]io.ReadCloser, error) {
+func (s *comStreamWrapper) Name() string {
+	return s.name
+}
+func GetFileContents() ([]NamedReadCloser, error) {
 	fds, err := GetFileGroupDescriptor()
 	if err != nil {
 		return nil, err
@@ -135,7 +153,7 @@ func GetFileContents() ([]io.ReadCloser, error) {
 		return nil, err
 	}
 	defer dataObject.Release()
-	id1, _ := winsys.RegisterClipboardFormat("FileContents")
+	id1, _ := winsys.RegisterClipboardFormat(_CFSTR_FILECONTENTS)
 
 	const DVASPECT_CONTENT = 0x1
 	format := winsys.FORMATETC{
@@ -146,7 +164,7 @@ func GetFileContents() ([]io.ReadCloser, error) {
 		Tymed:          uint32(winsys.TymedHGLOBAL | winsys.TymedISTREAM),
 	}
 
-	var result []io.ReadCloser
+	var result []NamedReadCloser
 	for i := 0; i < len(fds); i++ {
 		format.Index = int32(i)
 		var medium winsys.STGMEDIUM
@@ -159,18 +177,18 @@ func GetFileContents() ([]io.ReadCloser, error) {
 			medium.Release()
 			return nil, err
 		}
-		result = append(result, &comStreamWrapper{iStream: stream, medium: medium})
+		result = append(result, &comStreamWrapper{iStream: stream, medium: medium, name: fds[i].Name})
 	}
 
 	return result, nil
 }
-func GetFileContent(index int) (io.ReadCloser, error) {
+func GetFileContent(index int) (NamedReadCloser, error) {
 	var dataObject *winsys.IDataObject
 	if err := winsys.OleGetClipboard(&dataObject); err != nil {
 		return nil, err
 	}
 	defer dataObject.Release()
-	id1, _ := winsys.RegisterClipboardFormat("FileContents")
+	id1, _ := winsys.RegisterClipboardFormat(_CFSTR_FILECONTENTS)
 
 	const DVASPECT_CONTENT = 0x1
 	format := winsys.FORMATETC{
@@ -276,7 +294,7 @@ func Formats() ([]int, error) {
 	return result, nil
 }
 
-var ErrUnknownClipboardFormat = errors.New("unkown clipboard format")
+var ErrUnknownClipboardFormat = errors.New("unknown clipboard format")
 
 var predefinedFormatNames = map[uint]string{
 	1:  "CF_TEXT",
